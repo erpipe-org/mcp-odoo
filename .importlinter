@@ -9,6 +9,7 @@ source_modules =
     odoo_mcp.schema_cache
     odoo_mcp.write_policy
     odoo_mcp.access_helpers
+    odoo_mcp.addon_scanner
     odoo_mcp.agent_tools
     odoo_mcp.field_ranking
     odoo_mcp.diagnostics
