@@ -281,6 +281,7 @@ def _metadata_issues_for_values(
     fields_metadata: dict[str, Any],
     *,
     label: str = "",
+    readonly_create_fields: frozenset[str] = frozenset(),
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     """Check one values dict against fields_get metadata."""
     issues: list[dict[str, str]] = []
@@ -300,7 +301,7 @@ def _metadata_issues_for_values(
             )
             continue
         field_type = str(meta.get("type", ""))
-        if meta.get("readonly"):
+        if meta.get("readonly") and field_name not in readonly_create_fields:
             issues.append(
                 {
                     "code": "readonly_field",
@@ -327,6 +328,126 @@ def _metadata_issues_for_values(
     return issues, hints
 
 
+def is_journal_entry_create(
+    model: str,
+    operation: str,
+    values: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> bool:
+    """Identify the narrow ORM create contract; never infer an existing move's state."""
+    context = context or {}
+    return (
+        model == "account.move"
+        and operation.strip().lower() == "create"
+        and values.get("move_type", context.get("default_move_type", "entry"))
+        == "entry"
+        and values.get("state", context.get("default_state", "draft")) == "draft"
+    )
+
+
+def _journal_entry_create_issues(
+    values: dict[str, Any],
+    fields_metadata: dict[str, Any],
+    line_fields_metadata: dict[str, Any] | None,
+    context: dict[str, Any] | None,
+    *,
+    label: str,
+) -> tuple[list[dict[str, str]], frozenset[str]]:
+    """Validate new journal items, without changing the approved command list.
+
+    Odoo's readonly flag describes UI behavior, not ORM create permissions.
+    Only these two known fields have an exception. Existing-item commands and
+    nested relational mutations are deliberately outside this create contract.
+    Balance, currencies, defaults, ACLs and accounting rules remain Odoo's job.
+    """
+    issues: list[dict[str, str]] = []
+    allowed: set[str] = set()
+    prefix = f"{label}: " if label else ""
+
+    def reject(code: str, message: str) -> None:
+        issues.append({"code": code, "severity": "error", "message": prefix + message})
+
+    # Do not approve a payload that disables the ORM balance check or that
+    # inherits lines from context instead of the explicitly validated commands.
+    context = context or {}
+    if "check_move_validity" in context and context["check_move_validity"] is not True:
+        reject(
+            "unsafe_journal_entry_context", "check_move_validity must remain enabled."
+        )
+    if "default_line_ids" in context:
+        reject(
+            "unsafe_journal_entry_context",
+            "Pass line_ids in values, not context defaults.",
+        )
+
+    type_meta = fields_metadata.get("move_type")
+    if isinstance(type_meta, dict) and type_meta.get("type") == "selection":
+        allowed.add("move_type")
+
+    if "line_ids" not in values:
+        return issues, frozenset(allowed)
+
+    line_meta = fields_metadata.get("line_ids")
+    if not (
+        isinstance(line_meta, dict)
+        and line_meta.get("type") == "one2many"
+        and line_meta.get("relation") == "account.move.line"
+    ):
+        reject(
+            "invalid_journal_line_metadata",
+            "line_ids must relate to account.move.line.",
+        )
+        return issues, frozenset(allowed)
+    allowed.add("line_ids")
+
+    if not line_fields_metadata or "error" in line_fields_metadata:
+        reject(
+            "missing_journal_line_metadata", "account.move.line metadata is required."
+        )
+        return issues, frozenset(allowed)
+
+    commands = values["line_ids"]
+    if not isinstance(commands, list) or not commands:
+        reject(
+            "invalid_journal_line_command",
+            "line_ids must be a non-empty list of [0, 0, values] commands.",
+        )
+        return issues, frozenset(allowed)
+
+    for index, command in enumerate(commands):
+        path = f"line_ids[{index}]"
+        if not (
+            isinstance(command, list)
+            and len(command) == 3
+            and type(command[0]) is int
+            and command[0] == 0
+            and type(command[1]) is int
+            and command[1] == 0
+            and isinstance(command[2], dict)
+            and command[2]
+        ):
+            reject(
+                "invalid_journal_line_command",
+                f"{path} must create a new item with [0, 0, values].",
+            )
+            continue
+        line_values = command[2]
+        line_issues, _ = _metadata_issues_for_values(
+            line_values, line_fields_metadata, label=prefix + path
+        )
+        issues.extend(line_issues)
+        for field_name in line_values:
+            meta = line_fields_metadata.get(field_name)
+            if field_name == "move_id" or (
+                isinstance(meta, dict) and meta.get("type") in {"one2many", "many2many"}
+            ):
+                reject(
+                    "unsupported_journal_line_field",
+                    f"{path}.{field_name}: reparenting and nested relational commands are not supported.",
+                )
+    return issues, frozenset(allowed)
+
+
 def validate_write_report(
     *,
     model: str,
@@ -336,6 +457,7 @@ def validate_write_report(
     values_list: list[dict[str, Any]] | None = None,
     context: dict[str, Any] | None = None,
     fields_metadata: dict[str, Any] | None = None,
+    line_fields_metadata: dict[str, Any] | None = None,
     metadata_source: str = "none",
     instance: str = "default",
 ) -> dict[str, Any]:
@@ -353,21 +475,31 @@ def validate_write_report(
     field_hints: list[dict[str, str]] = []
     normalized_values = dict(values or {})
     if fields_metadata is not None:
-        if values_list is not None:
-            for index, entry in enumerate(values_list):
-                if not isinstance(entry, dict):
-                    continue  # preview already flagged the entry shape
-                entry_issues, entry_hints = _metadata_issues_for_values(
-                    entry, fields_metadata, label=f"values_list[{index}]"
+        entries = (
+            [
+                (f"values_list[{index}]", entry)
+                for index, entry in enumerate(values_list)
+            ]
+            if values_list is not None
+            else [("", normalized_values)]
+        )
+        for label, entry in entries:
+            if not isinstance(entry, dict):
+                continue  # preview already flagged the entry shape
+            readonly_create_fields: frozenset[str] = frozenset()
+            if is_journal_entry_create(model, operation, entry, context):
+                journal_issues, readonly_create_fields = _journal_entry_create_issues(
+                    entry, fields_metadata, line_fields_metadata, context, label=label
                 )
-                issues.extend(entry_issues)
-                field_hints.extend(entry_hints)
-        else:
-            value_issues, value_hints = _metadata_issues_for_values(
-                normalized_values, fields_metadata
+                issues.extend(journal_issues)
+            entry_issues, entry_hints = _metadata_issues_for_values(
+                entry,
+                fields_metadata,
+                label=label,
+                readonly_create_fields=readonly_create_fields,
             )
-            issues.extend(value_issues)
-            field_hints.extend(value_hints)
+            issues.extend(entry_issues)
+            field_hints.extend(entry_hints)
 
         if operation == "create" and values_list is None:
             for field_name, raw_meta in sorted(fields_metadata.items()):

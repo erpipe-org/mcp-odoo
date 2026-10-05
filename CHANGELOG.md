@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `validate_write` accepts the UI-readonly `line_ids` and `move_type="entry"`
+  fields when creating a draft `account.move` journal entry. New journal items
+  require live child-model metadata and create-only commands; unrelated readonly
+  fields and existing-record writes retain their checks. Single and batch
+  creates preserve the original approval payload and distinct same-account items.
+  Odoo remains responsible for balance and accounting constraints at execution.
+
+### Added
+
+- Disposable journal-entry Compose smoke test for Odoo 16-19 over XML-RPC and
+  Odoo 19 over JSON-2, covering single and batch MCP approval flows, live parent
+  and child metadata, posting, atomic rollback on imbalance, independent
+  reconciliation of same-account items, and negative validation/execution gates.
+
 ## [1.3.2] - 2026-08-19
 
 ### Changed

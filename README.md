@@ -499,6 +499,14 @@ values are deliberately unsupported (they would need one non-atomic RPC per
 record). Optional extras: `ODOO_MCP_ELICIT_WRITES=1` adds a native
 human-confirmation form, `ODOO_MCP_AUDIT_LOG` records every write-path event.
 
+Journal entries use the same workflow: `account.move` creation accepts
+`move_type="entry"` (or its default) and new `line_ids` commands even when Odoo
+marks these fields UI-readonly. Each item is checked against live
+`account.move.line` metadata; separate commands on the same account remain
+separate items. Odoo still checks balance and accounting constraints at execution.
+See [Journal entry writes](docs/journal-entry-writes.md) for the payload,
+supported command shapes, posting, and a disposable integration test.
+
 Large binary fields (a resume attached to `ir.attachment.datas`, a product
 image, ...) don't have to be inlined as base64 in the tool call — pass
 `<field>_from_path` instead (e.g. `datas_from_path: "/local/path/cv.pdf"`) to
