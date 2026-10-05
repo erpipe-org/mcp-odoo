@@ -12,6 +12,7 @@ import asyncio
 import json
 import socket
 import sys
+import traceback
 from copy import deepcopy
 from datetime import date
 from typing import Any
@@ -173,7 +174,11 @@ async def journal_entry_smoke(
                     "source": "server",
                 }
                 assert preview["approval"]["token"] == validation["approval"]["token"]
-                assert preview["approval"] == validation["approval"]
+                # Live validation adds TTL timestamps outside the canonical
+                # payload; all preview fields must remain identical.
+                assert preview["approval"] == {
+                    key: validation["approval"][key] for key in preview["approval"]
+                }
                 assert arguments == original
                 key = "values_list" if batch else "values"
                 assert validation["approval"][key] == original[key]
@@ -206,6 +211,7 @@ async def journal_entry_smoke(
                 )
                 assert result.get("success") is success, result
                 if not success:
+                    assert "balanc" in result.get("error", "").lower(), result
                     return []
                 ids = result["result"]
                 ids = ids if isinstance(ids, list) else [ids]
@@ -411,6 +417,11 @@ async def journal_entry_smoke(
             assert after["Item A"]["reconciled"] is True, reconciled
             assert after["Item B"]["reconciled"] is False, after
             assert after["Item B"]["amount_residual"] == 20, after
+            if batch:
+                untouched = {line["name"]: line for line in lines(move_ids[1])}
+                assert untouched["Item A"]["reconciled"] is False, untouched
+                assert untouched["Item A"]["amount_residual"] == 10, untouched
+                assert untouched["Item B"]["amount_residual"] == 20, untouched
 
     return {
         "version": target.version,
@@ -418,6 +429,11 @@ async def journal_entry_smoke(
         "transport": f"stdio/{transport}",
         "create": "batch" if batch else "single",
         "live_parent_and_child_metadata": True,
+        "parent_readonly": {
+            field: bool(parent_fields[field].get("readonly"))
+            for field in ("line_ids", "move_type")
+        },
+        "reconcile_response_success": bool(reconciled.get("success")),
         "negative_checks_and_gates": True,
         "distinct_lines": True,
         "posted": True,
@@ -470,15 +486,18 @@ def smoke_one(version: str, timeout: int) -> list[dict[str, Any]]:
         run(compose_cmd(target, "up", "-d", "odoo"), env=env)
         wait_for_http(target.port, timeout)
         wait_for_xmlrpc(target, timeout)
-        return [
-            asyncio.run(
-                journal_entry_smoke(
-                    target, transport=transport, api_key=api_key, batch=batch
+        results = []
+        for transport in ["xmlrpc", "json2"] if api_key else ["xmlrpc"]:
+            for batch in (False, True):
+                print(f"Journal smoke: {version} {transport} batch={batch}", flush=True)
+                result = asyncio.run(
+                    journal_entry_smoke(
+                        target, transport=transport, api_key=api_key, batch=batch
+                    )
                 )
-            )
-            for transport in (["xmlrpc", "json2"] if api_key else ["xmlrpc"])
-            for batch in (False, True)
-        ]
+                results.append(result)
+                print(json.dumps(result, sort_keys=True), flush=True)
+        return results
     finally:
         run(compose_cmd(target, "down", "-v", "--remove-orphans"), env=env, check=False)
 
@@ -494,6 +513,7 @@ def main() -> int:
         try:
             results.extend(smoke_one(version, args.timeout))
         except Exception as exc:
+            traceback.print_exc()
             failures.append({"version": version, "error": repr(exc)})
     print(json.dumps({"passed": results, "failed": failures}, indent=2, sort_keys=True))
     return 1 if failures else 0

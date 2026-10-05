@@ -173,6 +173,39 @@ def test_explicit_entry_type_overrides_context_default(values):
     assert report["success"] is True
 
 
+@pytest.mark.parametrize("readonly", [True, False])
+def test_line_validation_is_required_even_when_parent_is_ui_writable(values, readonly):
+    metadata = deepcopy(MOVE_FIELDS)
+    metadata["line_ids"]["readonly"] = readonly
+    metadata["move_type"]["readonly"] = readonly
+    assert validate(values, fields_metadata=metadata)["success"] is True
+    values["line_ids"][0][2]["amount_residual"] = 10
+    report = validate(values, fields_metadata=metadata)
+    assert report["success"] is False
+    assert any(
+        issue["code"] == "readonly_field" and "line_ids[0]" in issue["message"]
+        for issue in report["issues"]
+    )
+
+
+def test_explicit_draft_does_not_override_readonly_state_validation(values):
+    values["state"] = "draft"
+    report = validate(values, context={"default_state": "posted"})
+    assert report["success"] is False
+    assert any("'state' is readonly" in issue["message"] for issue in report["issues"])
+
+
+def test_mixed_batch_cannot_authorize_invoice_via_entry_exception(values):
+    invoice = deepcopy(values)
+    invoice["move_type"] = "in_invoice"
+    report = validate(None, values_list=[values, invoice])
+    assert report["success"] is False
+    assert any(
+        issue["code"] == "readonly_field" and "values_list[1]" in issue["message"]
+        for issue in report["issues"]
+    )
+
+
 @pytest.mark.parametrize(
     "commands",
     [

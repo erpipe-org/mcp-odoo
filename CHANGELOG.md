@@ -15,9 +15,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Disposable journal-entry Compose smoke test covering the MCP approval flow,
-  posting, atomic rollback on imbalance, and independent reconciliation of
-  same-account items.
+- Disposable journal-entry Compose smoke test for Odoo 16-19 over XML-RPC and
+  Odoo 19 over JSON-2, covering single and batch MCP approval flows, live parent
+  and child metadata, posting, atomic rollback on imbalance, independent
+  reconciliation of same-account items, and negative validation/execution gates.
 
 ## [1.3.2] - 2026-08-19
 
