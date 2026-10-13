@@ -207,6 +207,14 @@ server implements RFC 7662 token introspection and RFC 9728 protected-resource
 metadata. Compatible authorization servers include Keycloak, Auth0, Authentik,
 and any AS with a standard introspection endpoint.
 
+With OAuth enabled, write approvals are bound to the caller: an approval
+returned by `validate_write` (or a `chatter_post` preview) can only be executed
+by the same authenticated principal — token `client_id`, `iss`, and `sub` —
+in the same MCP session. Other clients of the same server process get a
+`different authenticated principal` error, even when they send an identical
+payload. The `ODOO_MCP_AUDIT_LOG` lines name that principal; the MCP session
+id is stored as a digest.
+
 ### Required environment variables
 
 | Variable | Description |

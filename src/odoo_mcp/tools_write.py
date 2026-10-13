@@ -49,6 +49,8 @@ from .server_core import (
     mcp,
     _app_context,
     _resolve_odoo,
+    approval_principal_matches,
+    current_principal,
     register_write_approval,
     require_validated_write_approval,
     restrict_attachment_upload_path,
@@ -236,6 +238,7 @@ def preview_write(
             record_ids=[int(rid) for rid in record_ids or []],
             instance=_srv().resolve_instance_name(instance),
             token=str((report.get("approval") or {}).get("token") or "") or None,
+            principal=current_principal(),
         )
         return report
     except Exception as e:
@@ -263,6 +266,7 @@ def validate_write(
     try:
         validate_model_name(model)
         instance_name = _srv().resolve_instance_name(instance)
+        principal = current_principal(ctx)
 
         resolved_binary_values: Dict[str, Any] = {}
         if values:
@@ -323,6 +327,7 @@ def validate_write(
                 _app_context(ctx),
                 report,
                 resolved_binary_values=resolved_binary_values or None,
+                principal=principal,
             )
             report["approval_status"] = {
                 "stored": stored,
@@ -349,6 +354,7 @@ def validate_write(
             instance=instance_name,
             token=str((report.get("approval") or {}).get("token") or "") or None,
             detail=None if report.get("success") else "validation issues present",
+            principal=principal,
         )
         return report
     except Exception as e:
@@ -391,6 +397,7 @@ async def execute_approved_write_tool(
             instance=str(approval.get("instance") or "") or None,
             token=str(approval.get("token") or "") or None,
             detail=detail,
+            principal=current_principal(ctx),
         )
         return {
             "success": False,
@@ -421,6 +428,7 @@ def execute_approved_write(
         instance=str(approval.get("instance") or "") or None,
         token=str(approval.get("token") or "") or None,
         detail=report.get("error"),
+        principal=current_principal(ctx),
     )
     return report
 
@@ -458,6 +466,17 @@ def _execute_approved_write_gated(
                 "success": False,
                 "tool": "execute_approved_write",
                 "error": "approval payload does not match the stored validation record",
+            }
+        if not approval_principal_matches(validation_record, current_principal(ctx)):
+            # Leave the record in place: a foreign caller must not be able to
+            # consume or cancel another principal's pending approval.
+            return {
+                "success": False,
+                "tool": "execute_approved_write",
+                "error": (
+                    "approval was validated by a different authenticated principal "
+                    "or MCP session; call validate_write as this caller first"
+                ),
             }
         if not confirm:
             return {
@@ -604,7 +623,12 @@ def chatter_post(
             attachment_ids=attachment_ids,
             instance=instance_name,
         )
-        token = build_approval_token(canonical)
+        principal = current_principal(ctx)
+        # On authenticated transports the token also binds the caller, so a
+        # preview obtained by one principal cannot be replayed by another.
+        token = build_approval_token(
+            {**canonical, "principal": principal} if principal else canonical
+        )
 
         direct_mode = chatter_direct_enabled()
         if direct_mode:
@@ -622,6 +646,7 @@ def chatter_post(
                 record_ids=[record_id],
                 instance=instance_name,
                 detail="direct mode",
+                principal=principal,
             )
             return {
                 "success": True,
@@ -648,7 +673,8 @@ def chatter_post(
         provided_token = str(approval.get("token", ""))
         if provided_token != token:
             raise ValueError(
-                "Approval token does not match the chatter payload — re-run preview."
+                "Approval token does not match the chatter payload for this caller "
+                "(principal / MCP session) — re-run preview."
             )
         if not confirm:
             raise ValueError(
@@ -669,6 +695,7 @@ def chatter_post(
             record_ids=[record_id],
             instance=instance_name,
             token=provided_token,
+            principal=principal,
         )
         return {
             "success": True,

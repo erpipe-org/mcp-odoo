@@ -204,14 +204,20 @@ class IntrospectionTokenVerifier(TokenVerifier):
 
         scope_raw = payload.get("scope", "")
         scopes = scope_raw.split() if isinstance(scope_raw, str) else []
+        subject = payload.get("sub")
+        # `subject` and `iss` make (client_id, issuer, subject) the principal
+        # (mcp.server.auth.provider.principal_components), so two users of one
+        # OAuth client never share write approvals (server_core.current_principal).
         return AccessToken(
             token=token,
-            client_id=str(payload.get("client_id") or payload.get("sub") or "unknown"),
+            client_id=str(payload.get("client_id") or subject or "unknown"),
             scopes=scopes,
             expires_at=(
                 int(expires_at) if isinstance(expires_at, (int, float)) else None
             ),
             resource=self.resource_url,
+            subject=str(subject) if subject is not None else None,
+            claims={"iss": str(issuer)} if issuer is not None else None,
         )
 
 

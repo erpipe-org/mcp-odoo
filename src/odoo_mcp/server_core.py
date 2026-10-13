@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, cast
 
+from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.provider import principal_components
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import Annotations, ToolAnnotations
 from pydantic import BaseModel, Field
@@ -254,6 +256,47 @@ def resolve_read_fields(
 # Write-approval helpers
 # ---------------------------------------------------------------------------
 
+MCP_SESSION_ID_HEADER = "mcp-session-id"
+
+
+def _request_session_id(ctx: Optional[Context]) -> Optional[str]:
+    """Return the Streamable HTTP session id of this request, if any.
+
+    ``None`` on stdio, stateless HTTP, and direct Python calls (no request).
+    """
+    if ctx is None:
+        return None
+    try:
+        request = ctx.request_context.request
+    except (AttributeError, ValueError):
+        return None
+    headers = getattr(request, "headers", None)
+    if headers is None:
+        return None
+    session_id = headers.get(MCP_SESSION_ID_HEADER)
+    return str(session_id) if session_id else None
+
+
+def current_principal(ctx: Optional[Context] = None) -> Optional[Dict[str, Optional[str]]]:
+    """Return the authenticated caller identity, or None when unauthenticated.
+
+    Populated only when the OAuth resource server (``auth.py``) authenticated
+    this request: the token's ``(client_id, issuer, subject)`` plus the MCP
+    session id when the transport has one. stdio and unauthenticated HTTP
+    return None, so approval binding degrades to the legacy per-process store.
+    """
+    token = get_access_token()
+    if token is None:
+        return None
+    client_id, issuer, subject = principal_components(token)
+    return {
+        "client_id": client_id,
+        "issuer": issuer,
+        "subject": subject,
+        "session_id": _request_session_id(ctx),
+    }
+
+
 
 def write_approval_payload(approval: Dict[str, Any]) -> Dict[str, Any]:
     """Return the canonical approval payload fields used for execution."""
@@ -294,8 +337,14 @@ def register_write_approval(
     app_context: AppContext,
     report: Dict[str, Any],
     resolved_binary_values: Optional[Dict[str, str]] = None,
+    principal: Optional[Dict[str, Optional[str]]] = None,
 ) -> bool:
     """Persist validated write approvals inside the current server lifespan.
+
+    ``principal`` (see ``current_principal``) binds the record to the
+    authenticated caller that validated it; ``execute_approved_write`` refuses
+    any other caller. ``None`` (stdio / unauthenticated HTTP) keeps the record
+    usable by any caller of this process, as before.
 
     ``resolved_binary_values`` (field name -> real base64), when given, is
     stored only in this server-side record — never in ``report["approval"]``,
@@ -315,6 +364,7 @@ def register_write_approval(
         "payload": write_approval_payload(approval),
         "validated_at": now,
         "expires_at": now + WRITE_APPROVAL_TTL_SECONDS,
+        "principal": dict(principal) if principal else None,
     }
     if resolved_binary_values:
         record["resolved_binary_values"] = dict(resolved_binary_values)
@@ -336,6 +386,18 @@ def require_validated_write_approval(
         app_context.write_approvals.pop(token, None)
         return None
     return record
+
+
+def approval_principal_matches(
+    record: Dict[str, Any], principal: Optional[Dict[str, Optional[str]]]
+) -> bool:
+    """True when ``principal`` is the caller the validation record is bound to.
+
+    Strict equality: an authenticated record never matches an unauthenticated
+    caller (or a different client, subject, issuer, or MCP session), and an
+    unauthenticated record never matches an authenticated caller.
+    """
+    return record.get("principal") == (dict(principal) if principal else None)
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-13
+
+### Security
+
+- With the OAuth resource server enabled on an HTTP transport, write approvals
+  are now bound to the authenticated caller. `execute_approved_write` refuses
+  an approval that `validate_write` stored for a different principal (token
+  `client_id`, issuer, and subject) or a different MCP session, so one client
+  can no longer execute a write that another client validated by replaying the
+  same payload. A refused attempt does not consume the other caller's
+  approval. `chatter_post` approval tokens are bound the same way. stdio and
+  unauthenticated HTTP keep the previous per-process behavior.
+- The token verifier now passes the introspected `sub` and `iss` to the MCP
+  SDK, so users who share one OAuth client are distinct principals.
+
+### Added
+
+- `ODOO_MCP_AUDIT_LOG` entries include a `principal` object (`client_id`,
+  `issuer`, `subject`, `session_sha256`) on authenticated transports, and
+  `null` otherwise.
+
 ## [1.3.2] - 2026-08-19
 
 ### Changed

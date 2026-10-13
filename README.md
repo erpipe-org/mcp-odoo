@@ -86,7 +86,7 @@ Once configured (see [Setup](#setup)), ask your agent things like:
 | Structured logging | JSON formatter and rotating file handler via `ODOO_MCP_LOG_LEVEL`, `ODOO_MCP_LOG_JSON`, `ODOO_MCP_LOG_FILE`. |
 | Safe writes | Direct `create`, `write`, and `unlink` are blocked; approved writes require live metadata, a same-session token, explicit confirmation, and an env gate. |
 | Human-in-the-loop approval | `ODOO_MCP_ELICIT_WRITES=1` shows a native MCP confirmation form (with a diff summary) before any approved write executes — token flow stays as fallback. |
-| Audit trail | `ODOO_MCP_AUDIT_LOG` appends one JSONL line per write-path event (preview, validate, execute, chatter) with instance and token digest. |
+| Audit trail | `ODOO_MCP_AUDIT_LOG` appends one JSONL line per write-path event (preview, validate, execute, chatter) with instance, token digest, and — with OAuth enabled — the authenticated principal. |
 | Resilience | Read-only calls retry connection errors with exponential backoff; schema caches are TTL- and LRU-bounded; `health_check` flags N+1 read loops. |
 | Real smoke tests | Docker Compose validation boots disposable Odoo 16.0, 17.0, 18.0, and 19.0 stacks, including restricted users, custom record rules, and packaged addon XML install/update. |
 
@@ -485,6 +485,8 @@ Writes are intentionally boring.
 2. `validate_write` checks model metadata, required fields, readonly fields, relation hints, record IDs, and payload shape.
 3. `execute_approved_write` runs only when all gates pass:
    - the approval came from `validate_write` in the same server process,
+   - with OAuth enabled (`ODOO_MCP_AUTH_*`), the caller is the same authenticated
+     principal (client id, issuer, subject) and MCP session that ran `validate_write`,
    - validation used trusted, non-empty live Odoo `fields_get` metadata,
    - the token has not expired or been consumed,
    - `confirm=true` is passed,

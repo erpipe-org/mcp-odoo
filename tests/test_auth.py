@@ -44,6 +44,29 @@ def test_verify_token_accepts_active_token_with_matching_audience():
     assert token.client_id == "agent-1"
     assert token.scopes == ["odoo.read", "odoo.write"]
     assert token.resource == RESOURCE
+    assert token.subject is None
+    assert token.claims is None
+
+
+def test_verify_token_carries_subject_and_issuer_for_principal_binding():
+    def handler(request):
+        return _json_response(
+            {
+                "active": True,
+                "aud": RESOURCE,
+                "client_id": "shared-app",
+                "sub": "user-1",
+                "iss": "https://as.example.com/",
+            }
+        )
+
+    token = asyncio.run(
+        _verifier(handler, issuer_url="https://as.example.com").verify_token("tok")
+    )
+    assert token is not None
+    assert token.client_id == "shared-app"
+    assert token.subject == "user-1"
+    assert token.claims == {"iss": "https://as.example.com/"}
 
 
 def test_verify_token_rejects_inactive_expired_and_wrong_audience():
