@@ -1517,6 +1517,40 @@ def test_aggregate_records_uses_formatted_read_group_on_odoo_19():
     assert client.calls[0][2]["aggregates"] == ["amount_total:sum"]
 
 
+def test_aggregate_records_orders_by_a_measure_on_odoo_19():
+    """Odoo 19 rejects "amount_untaxed desc"; the measure is sent as "field:agg"."""
+    server = importlib.import_module("odoo_mcp.server")
+    client = _AggregateClient(version="19.0+e", rows=[])
+
+    result = server.aggregate_records(
+        FakeCtx(client),
+        model="account.move",
+        group_by=["partner_id"],
+        measures=["amount_untaxed:sum", "amount_total:max"],
+        order="amount_untaxed desc, amount_total, partner_id asc",
+    )
+
+    assert result["success"] is True
+    assert client.calls[0][2]["order"] == (
+        "amount_untaxed:sum desc, amount_total:max, partner_id asc"
+    )
+
+
+def test_aggregate_records_keeps_the_order_on_legacy_odoo():
+    server = importlib.import_module("odoo_mcp.server")
+    client = _AggregateClient(version="17.0+e", rows=[])
+
+    server.aggregate_records(
+        FakeCtx(client),
+        model="account.move",
+        group_by=["partner_id"],
+        measures=["amount_untaxed:sum"],
+        order="amount_untaxed desc",
+    )
+
+    assert client.calls[0][2]["orderby"] == "amount_untaxed desc"
+
+
 def test_aggregate_records_uses_formatted_read_group_on_saas_19_metadata():
     server = importlib.import_module("odoo_mcp.server")
     client = _AggregateClient(

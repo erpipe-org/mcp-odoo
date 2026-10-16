@@ -199,6 +199,28 @@ def parse_measure_spec(spec: str) -> tuple[str, str]:
     return field, agg
 
 
+def normalize_group_order(order: str, measures: list[tuple[str, str]]) -> str:
+    """Rewrite an ``order`` for Odoo 19 ``formatted_read_group``.
+
+    Odoo 19 only accepts order terms that are a groupby field, ``__count`` or an
+    aggregate spec (``amount_total:sum``). Clients naturally write the measure
+    field alone (``amount_total desc``), which Odoo rejects with "Order term
+    ... is not a valid aggregate nor valid groupby". A bare field that is one of
+    the requested measures becomes ``field:agg``; every other term is kept.
+    """
+    aggregates = {field: agg for field, agg in measures}
+    terms = []
+    for raw in str(order).split(","):
+        parts = raw.strip().split()
+        if not parts:
+            continue
+        name = parts[0]
+        if ":" not in name and name in aggregates:
+            parts[0] = f"{name}:{aggregates[name]}"
+        terms.append(" ".join(parts))
+    return ", ".join(terms)
+
+
 def parse_odoo_major_version(value: Any) -> int | None:
     """Extract an Odoo major version from numeric and SaaS version shapes."""
     if isinstance(value, bool) or value is None:

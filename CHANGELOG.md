@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- On Odoo 19, `aggregate_records` with an `order` on a summed field (for
+  example `amount_untaxed desc`) no longer fails with `Order term ... is not
+  a valid aggregate`. A bare measure in `order` is now sent as `field:agg`,
+  as `formatted_read_group` requires; group-by fields and explicit
+  `field:agg` terms are kept as written. Older Odoo versions are unchanged.
+
 ## [1.3.2] - 2026-08-19
 
 ### Changed

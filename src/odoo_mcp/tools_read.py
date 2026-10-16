@@ -639,6 +639,7 @@ def aggregate_records(
     """
     from .tool_helpers import (
         formatted_read_group_missing,
+        normalize_group_order,
         odoo_major_version,
         parse_measure_spec,
     )
@@ -687,7 +688,9 @@ def aggregate_records(
         if clamped_limit is not None:
             formatted_kwargs["limit"] = clamped_limit
         if order:
-            formatted_kwargs["order"] = order
+            # Odoo 19 wants measures as "field:agg" in the order; legacy read_group
+            # (below) keeps the caller's order unchanged.
+            formatted_kwargs["order"] = normalize_group_order(order, parsed_measures)
 
         legacy_kwargs: Dict[str, Any] = {
             "domain": normalized_domain,

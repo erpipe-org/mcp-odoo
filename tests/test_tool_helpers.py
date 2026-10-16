@@ -548,3 +548,14 @@ class TestNormalizeDomainInput:
             ["name", "=", "'; DROP TABLE--"]
         )
         assert result == [["name", "=", "'; DROP TABLE--"]]
+
+
+def test_normalize_group_order_rewrites_bare_measures_only():
+    from odoo_mcp.tool_helpers import normalize_group_order
+
+    measures = [("amount_untaxed", "sum"), ("id", "count")]
+    assert normalize_group_order("amount_untaxed desc", measures) == "amount_untaxed:sum desc"
+    assert normalize_group_order("amount_untaxed:avg desc", measures) == "amount_untaxed:avg desc"
+    assert normalize_group_order("partner_id, __count desc", measures) == "partner_id, __count desc"
+    assert normalize_group_order(" id ,  ", measures) == "id:count"
+
