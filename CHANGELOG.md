@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `chatter_post` accepts an optional `subject`. Without one, Odoo titles the
+  notification email with the record name (for example `INV/2026/00036`).
+  The subject is plain text on one line, at most 200 characters: line breaks
+  and control characters become spaces, which also prevents email header
+  injection. It is not HTML-escaped, because `mail.message.subject` is a
+  plain-text field that Odoo escapes when displaying it. The subject is part
+  of the approval payload, so changing or dropping it invalidates the token.
+
 ## [1.3.2] - 2026-08-19
 
 ### Changed

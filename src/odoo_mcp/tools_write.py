@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import stat
+import unicodedata
 import xmlrpc.client
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional
@@ -522,6 +523,35 @@ def _execute_approved_write_gated(
         return {"success": False, "tool": "execute_approved_write", "error": str(e)}
 
 
+MAX_CHATTER_SUBJECT_LENGTH = 200
+
+
+def _normalize_chatter_subject(subject: Optional[str]) -> Optional[str]:
+    """Return a one-line plain-text subject, or None when blank.
+
+    ``mail.message.subject`` is a Char field: Odoo escapes it when rendering
+    the chatter and uses it as the email ``Subject`` header, so it is not
+    HTML-escaped here (that would show ``&amp;`` to recipients). Line breaks
+    and other control characters become spaces, which also rules out header
+    injection; whitespace runs collapse to one space.
+    """
+    if subject is None:
+        return None
+    flattened = "".join(
+        " " if unicodedata.category(ch) in {"Cc", "Zl", "Zp"} else ch
+        for ch in str(subject)
+    )
+    normalized = " ".join(flattened.split())
+    if not normalized:
+        return None
+    if len(normalized) > MAX_CHATTER_SUBJECT_LENGTH:
+        raise ValueError(
+            f"subject must be at most {MAX_CHATTER_SUBJECT_LENGTH} characters "
+            f"(got {len(normalized)})."
+        )
+    return normalized
+
+
 def _build_chatter_payload(
     *,
     model: str,
@@ -532,9 +562,13 @@ def _build_chatter_payload(
     partner_ids: Optional[List[int]],
     attachment_ids: Optional[List[int]],
     instance: str = "default",
+    subject: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build the canonical message_post call payload (deterministic ordering)."""
     kwargs: Dict[str, Any] = {"body": body, "message_type": message_type}
+    if subject:
+        # Only present when set, so tokens for subject-less posts are unchanged.
+        kwargs["subject"] = subject
     if subtype_xmlid:
         kwargs["subtype_xmlid"] = subtype_xmlid
     if partner_ids:
@@ -552,7 +586,8 @@ def _build_chatter_payload(
 
 @mcp.tool(
     description=(
-        "Post a chatter message on a mail.thread record. Default mode requires "
+        "Post a chatter message, with an optional one-line subject, on a "
+        "mail.thread record. Default mode requires "
         "an approval token returned from a preview call; set MCP_CHATTER_DIRECT=1 "
         "to bypass and post immediately."
     ),
@@ -571,6 +606,7 @@ def chatter_post(
     approval: Optional[Dict[str, Any]] = None,
     confirm: bool = False,
     instance: Optional[str] = None,
+    subject: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Post a message on the chatter of a mail.thread-derived record.
 
@@ -580,6 +616,12 @@ def chatter_post(
       ``confirm=true`` to send.
     - Direct (``MCP_CHATTER_DIRECT=1``): the message is posted on the first
       call without a token.
+
+    ``subject`` (optional) is plain text on one line, at most 200 characters;
+    line breaks and control characters become spaces. Odoo uses it as the
+    email subject instead of the record name. ``partner_ids`` sets the
+    recipients notified for a ``comment``; followers of the subtype are
+    notified too, as in the Odoo UI. The approval token covers the subject.
 
     Allowed ``message_type`` values: ``comment`` (default), ``notification``.
     """
@@ -593,6 +635,7 @@ def chatter_post(
             raise ValueError("body must be a non-empty string")
         if message_type not in {"comment", "notification"}:
             raise ValueError("message_type must be 'comment' or 'notification'.")
+        subject_text = _normalize_chatter_subject(subject)
 
         canonical = _build_chatter_payload(
             model=model,
@@ -603,6 +646,7 @@ def chatter_post(
             partner_ids=partner_ids,
             attachment_ids=attachment_ids,
             instance=instance_name,
+            subject=subject_text,
         )
         token = build_approval_token(canonical)
 
