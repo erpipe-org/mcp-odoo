@@ -1153,7 +1153,10 @@ async def mcp_stdio_smoke(
                     f"aggregate_records picked wrong method (expected {expected_method}): {aggregate}"
                 )
 
-            chatter_body = "Smoke chatter execute round-trip"
+            chatter_marker = f"Smoke chatter execute round-trip {transport}"
+            chatter_body = (
+                f"{chatter_marker}\nsecond line <script>alert(1)</script>"
+            )
             chatter_preview = decode_tool_json(
                 await session.call_tool(
                     "chatter_post",
@@ -1205,7 +1208,7 @@ async def mcp_stdio_smoke(
                         "domain": [
                             ["model", "=", "res.partner"],
                             ["res_id", "=", 1],
-                            ["body", "ilike", "round-trip"],
+                            ["body", "ilike", chatter_marker],
                         ],
                         "fields": ["id", "body"],
                         "limit": 5,
@@ -1216,6 +1219,18 @@ async def mcp_stdio_smoke(
             if chatter_persisted.get("count", 0) < 1:
                 raise AssertionError(
                     f"chatter_post execute did not persist a mail.message: {chatter_persisted}"
+                )
+            stored_body = str(
+                (chatter_persisted.get("result") or [{}])[0].get("body") or ""
+            )
+            # Plain-text line breaks survive as <br>; caller HTML stays escaped.
+            if "<br" not in stored_body or "second line" not in stored_body:
+                raise AssertionError(
+                    f"chatter_post lost the line break: {stored_body!r}"
+                )
+            if "<script" in stored_body or "&lt;script&gt;" not in stored_body:
+                raise AssertionError(
+                    f"chatter_post did not escape caller HTML: {stored_body!r}"
                 )
 
             return {

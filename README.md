@@ -81,7 +81,7 @@ Once configured (see [Setup](#setup)), ask your agent things like:
 | Streamable HTTP | Local HTTP/SSE support for clients that do not use stdio. |
 | Smart field selection | `search_records` and `read_record` curate business-relevant fields when no `fields` argument is supplied — drops audit, message, binary, and unstored compute noise. Pass `fields=["*"]` to opt out. |
 | Server-side aggregation | `aggregate_records` pushes groupby/sum/count/avg into Postgres via `formatted_read_group` (Odoo 19+) or `read_group` (16-18). |
-| Chatter integration | `chatter_post` adds messages to any `mail.thread` record under the same approval-token gate as writes — or directly via `MCP_CHATTER_DIRECT=1`. |
+| Chatter integration | `chatter_post` adds plain-text messages (line breaks kept, HTML escaped) to any `mail.thread` record under the same approval-token gate as writes — or directly via `MCP_CHATTER_DIRECT=1`. |
 | Locale plumbing | `ODOO_LOCALE` injects `context.lang` automatically on every Odoo call (caller can override). |
 | Structured logging | JSON formatter and rotating file handler via `ODOO_MCP_LOG_LEVEL`, `ODOO_MCP_LOG_JSON`, `ODOO_MCP_LOG_FILE`. |
 | Safe writes | Direct `create`, `write`, and `unlink` are blocked; approved writes require live metadata, a same-session token, explicit confirmation, and an env gate. |

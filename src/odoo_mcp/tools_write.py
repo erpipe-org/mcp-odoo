@@ -7,6 +7,7 @@ chatter_post, execute_method + WriteConfirmation + elicitation logic.
 
 import base64
 import hashlib
+import html
 import json
 import os
 import stat
@@ -33,6 +34,7 @@ from .diagnostics import (
 from .tool_helpers import (
     max_attachment_upload_bytes,
     normalize_domain_input,
+    odoo_major_version,
     truthy_env,
     validate_method_name,
     validate_model_name,
@@ -522,6 +524,38 @@ def _execute_approved_write_gated(
         return {"success": False, "tool": "execute_approved_write", "error": str(e)}
 
 
+# Odoo 17+ escapes a plain-str ``message_post`` body (RPC cannot send Markup)
+# unless ``body_is_html=True``; Odoo 16 has no such flag and stores the str as
+# HTML. Either way the caller's text is escaped here first, so only the
+# server-generated ``<br/>`` tags survive as markup.
+_BODY_IS_HTML_MIN_MAJOR = 17
+
+
+def _plain_text_to_chatter_html(text: str) -> str:
+    """Escape caller text and keep its line breaks as ``<br/>``."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return html.escape(normalized, quote=True).replace("\n", "<br/>")
+
+
+def _message_post_kwargs(odoo: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the RPC kwargs for message_post from the approved canonical kwargs.
+
+    The approval token and preview keep the caller's plain text; conversion to
+    escaped HTML happens only at execution.
+    """
+    call_kwargs = dict(kwargs)
+    call_kwargs["body"] = _plain_text_to_chatter_html(str(kwargs.get("body") or ""))
+    try:
+        major = odoo_major_version(odoo)
+    except Exception:
+        major = None
+    # Unknown version: send the flag anyway; Odoo 16 ignores unknown
+    # message_post kwargs (they only reach _notify_thread(**kwargs)).
+    if major is None or major >= _BODY_IS_HTML_MIN_MAJOR:
+        call_kwargs["body_is_html"] = True
+    return call_kwargs
+
+
 def _build_chatter_payload(
     *,
     model: str,
@@ -552,7 +586,8 @@ def _build_chatter_payload(
 
 @mcp.tool(
     description=(
-        "Post a chatter message on a mail.thread record. Default mode requires "
+        "Post a plain-text chatter message (line breaks kept, HTML escaped) on a "
+        "mail.thread record. Default mode requires "
         "an approval token returned from a preview call; set MCP_CHATTER_DIRECT=1 "
         "to bypass and post immediately."
     ),
@@ -580,6 +615,11 @@ def chatter_post(
       ``confirm=true`` to send.
     - Direct (``MCP_CHATTER_DIRECT=1``): the message is posted on the first
       call without a token.
+
+    ``body`` is plain text: line breaks are kept and everything else (HTML
+    tags, links, scripts) is escaped and shown literally. Odoo 17+ honours
+    this only for internal users; a portal API user's post shows the escaped
+    text.
 
     Allowed ``message_type`` values: ``comment`` (default), ``notification``.
     """
@@ -612,7 +652,7 @@ def chatter_post(
                 model,
                 "message_post",
                 [record_id],
-                **canonical["kwargs"],
+                **_message_post_kwargs(odoo, canonical["kwargs"]),
             )
             record_write_event(
                 "chatter_post",
@@ -659,7 +699,7 @@ def chatter_post(
             model,
             "message_post",
             [record_id],
-            **canonical["kwargs"],
+            **_message_post_kwargs(odoo, canonical["kwargs"]),
         )
         record_write_event(
             "chatter_post",
