@@ -13,7 +13,7 @@ from typing import Any, List, NoReturn, Optional, Union
 
 from pydantic import BaseModel, Field
 
-from .agent_tools import DEFAULT_MAX_SMART_FIELDS
+from .field_ranking import DEFAULT_MAX_SMART_FIELDS
 from .odoo_client import OdooClient
 
 MODEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*$")

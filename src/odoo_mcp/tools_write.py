@@ -21,6 +21,7 @@ from pydantic import Field
 from .agent_tools import (
     build_approval_token,
     build_write_preview_report,
+    is_journal_entry_create,
     validate_write_report,
     verify_write_approval,
 )
@@ -278,6 +279,7 @@ def validate_write(
                 ),
             }
 
+        line_fields_metadata = None
         metadata_source = "input" if fields_metadata is not None else "none"
         if fields_metadata is None and use_live_metadata:
             metadata_source = "server"
@@ -302,6 +304,16 @@ def validate_write(
                         "reason": "trusted live metadata was empty",
                     },
                 }
+            entries = values_list if values_list is not None else [values or {}]
+            if any(
+                isinstance(entry, dict)
+                and "line_ids" in entry
+                and is_journal_entry_create(model, operation, entry, context)
+                for entry in entries
+            ):
+                # Use the same resolved instance and trusted live source as the
+                # parent. Client-supplied metadata can never authorize children.
+                line_fields_metadata = odoo.get_model_fields("account.move.line")
         report = validate_write_report(
             model=model,
             operation=operation,
@@ -310,6 +322,7 @@ def validate_write(
             record_ids=record_ids,
             context=context,
             fields_metadata=fields_metadata,
+            line_fields_metadata=line_fields_metadata,
             metadata_source=metadata_source,
             instance=instance_name,
         )

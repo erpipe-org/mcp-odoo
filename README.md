@@ -499,6 +499,14 @@ values are deliberately unsupported (they would need one non-atomic RPC per
 record). Optional extras: `ODOO_MCP_ELICIT_WRITES=1` adds a native
 human-confirmation form, `ODOO_MCP_AUDIT_LOG` records every write-path event.
 
+Journal entries use the same workflow: `account.move` creation accepts
+`move_type="entry"` (or its default) and new `line_ids` commands even when Odoo
+marks these fields UI-readonly. Each item is checked against live
+`account.move.line` metadata; separate commands on the same account remain
+separate items. Odoo still checks balance and accounting constraints at execution.
+See [Journal entry writes](docs/journal-entry-writes.md) for the payload,
+supported command shapes, posting, and a disposable integration test.
+
 Large binary fields (a resume attached to `ir.attachment.datas`, a product
 image, ...) don't have to be inlined as base64 in the tool call — pass
 `<field>_from_path` instead (e.g. `datas_from_path: "/local/path/cv.pdf"`) to
@@ -509,6 +517,14 @@ context. Requires `ODOO_MCP_ATTACHMENT_UPLOAD_ROOTS` (fails closed otherwise)
 and respects `ODOO_MCP_MAX_ATTACHMENT_UPLOAD_BYTES`. No new tool — this rides
 the same `preview_write` → `validate_write` → `execute_approved_write` gate as
 every other write.
+
+Attachment creation and updates accept the UI-readonly `res_model` / `res_id`
+pair when both are provided explicitly with a model name and positive integer
+record ID. This lets uploads belong to their target document immediately and
+lets an existing unlinked attachment be repaired without uploading it again.
+Other readonly checks and all approval gates still apply. Linking alone does
+not post a chatter message or send an email. See
+[Attachment writes](docs/attachment-writes.md) for examples and verification.
 
 Reviewed side-effect methods such as `sale.order.action_confirm` can be enabled
 one by one:

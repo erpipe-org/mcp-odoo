@@ -18,8 +18,8 @@ class _Client:
         return {
             "name": {"type": "char", "readonly": False},
             "datas": {"type": "binary", "readonly": False},
-            "res_model": {"type": "char", "readonly": False},
-            "res_id": {"type": "integer", "readonly": False},
+            "res_model": {"type": "char", "readonly": True},
+            "res_id": {"type": "many2one_reference", "readonly": True},
         }
 
     def __init__(self):
