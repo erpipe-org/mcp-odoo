@@ -25,6 +25,7 @@ from .agent_tools import (
     verify_write_approval,
 )
 from .audit import record_write_event
+from .draft_bill_write import draft_bill_metadata, is_draft_bill_write
 from .diagnostics import (
     DESTRUCTIVE_METHODS,
     JSON2_POSITIONAL_ARG_MAP,
@@ -302,6 +303,10 @@ def validate_write(
                         "reason": "trusted live metadata was empty",
                     },
                 }
+            if is_draft_bill_write(model, operation, values or {}):
+                fields_metadata = draft_bill_metadata(
+                    odoo, record_ids or [], values or {}, context or {}, fields_metadata
+                )
         report = validate_write_report(
             model=model,
             operation=operation,
@@ -508,6 +513,11 @@ def _execute_approved_write_gated(
         else:
             _, odoo = app_context.get_client(approval_instance)
 
+        if is_draft_bill_write(model, operation, values):
+            # A bill may have been posted or its lines changed since approval.
+            draft_bill_metadata(
+                odoo, record_ids, values, context, odoo.get_model_fields(model)
+            )
         result = odoo.execute_method(model, operation, *args, **kwargs)
         app_context.write_approvals.pop(str(approval.get("token", "")), None)
         return {
