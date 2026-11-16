@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Allow supported updates to existing draft vendor bills when Odoo exposes
+  invoice fields as UI-readonly. Validation checks live document state and
+  invoice line ownership, and repeats those checks before execution. See
+  [draft vendor bill writes](docs/draft-vendor-bill-writes.md) for supported
+  fields, line commands and limitations.
+
 ## [1.3.2] - 2026-08-19
 
 ### Changed
