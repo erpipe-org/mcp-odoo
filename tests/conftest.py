@@ -35,3 +35,13 @@ def _isolate_developer_odoo_config(monkeypatch, tmp_path):
 def odoo_client_module():
     module = importlib.import_module("odoo_mcp.odoo_client")
     return importlib.reload(module)
+
+
+@pytest.fixture(autouse=True)
+def _reset_model_policy_cache():
+    """The model ACL policy is cached per process; never leak it across tests."""
+    from odoo_mcp.model_policy import reset_model_policy
+
+    reset_model_policy()
+    yield
+    reset_model_policy()

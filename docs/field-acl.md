@@ -78,6 +78,9 @@ withheld, so it does not hallucinate their absence or values.
 - **`read_attachment`** returns attachment metadata + content. Field ACL
   applies to the metadata dict; it does not parse attachment *payloads*. Do
   not rely on it to redact secrets embedded inside attachment bytes.
+- **Whole models or methods** are restricted by
+  [model ACL](model-acl.md), not this policy. Field ACL only trims fields
+  from models the agent can already read.
 - **Writes are governed by the write policy, not this one.** Field ACL is a
   read-path control. The gated write workflow (`preview_write` →
   `validate_write` → `execute_approved_write`) is unchanged; a field you hide

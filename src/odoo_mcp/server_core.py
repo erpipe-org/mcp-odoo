@@ -39,6 +39,7 @@ from .write_policy import (
 from .audit import audit_posture
 from .auth import auth_posture as oauth_posture
 from .field_policy import field_policy_posture, get_field_policy
+from .model_policy import get_model_policy, model_policy_posture
 
 
 def _srv() -> Any:
@@ -92,6 +93,7 @@ async def app_lifespan(server: MCPServer) -> AsyncIterator[AppContext]:
     # Validate the field ACL policy at startup so a malformed policy fails
     # closed (aborts) instead of silently running unprotected at first read.
     get_field_policy()
+    get_model_policy()
     yield AppContext()
 
 
@@ -547,11 +549,13 @@ def runtime_security_report() -> Dict[str, Any]:
         "audit_log": audit_posture(),
         "oauth": oauth_posture(),
         "field_acl": field_policy_posture(),
+        "model_acl": model_policy_posture(),
         "n_plus_one": n_plus_one_report(),
         "notes": [
             "HTTP transports are local-only by default in the CLI entry point.",
             "execute_approved_write requires ODOO_MCP_ENABLE_WRITES and confirm=true.",
             "execute_method blocks standard destructive methods and unreviewed side-effect methods by default.",
+            "model_acl (when configured) gates every Odoo call by model and method, on top of the gates above.",
         ],
     }
 
@@ -584,6 +588,16 @@ def get_models() -> str:
     """Lists all available models in the Odoo system"""
     odoo_client = _srv().get_odoo_client()
     models = odoo_client.get_models()
+    policy = get_model_policy()
+    instance_name = _srv().resolve_default_instance_name()
+    if policy.instance_acl(instance_name) is not None and "model_names" in models:
+        visible = policy.filter_models(instance_name, models["model_names"])
+        details = models.get("models_details", {})
+        models = {
+            **models,
+            "model_names": visible,
+            "models_details": {name: details[name] for name in visible if name in details},
+        }
     return json.dumps(models, indent=2)
 
 
@@ -598,6 +612,11 @@ def get_model_info(model_name: str) -> str:
     odoo_client = _srv().get_odoo_client()
     try:
         validate_model_name(model_name)
+        refusal = get_model_policy().visibility_refusal(
+            _srv().resolve_default_instance_name(), model_name
+        )
+        if refusal is not None:
+            return json.dumps({"error": refusal["error"]}, indent=2)
         model_info = odoo_client.get_model_info(model_name)
         fields = odoo_client.get_model_fields(model_name)
         model_info["fields"] = fields

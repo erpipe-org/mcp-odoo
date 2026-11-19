@@ -18,6 +18,7 @@ source_modules =
     odoo_mcp.knowledge_index
     odoo_mcp.accounting_tools
     odoo_mcp.field_policy
+    odoo_mcp.model_policy
     odoo_mcp.cross_instance
     odoo_mcp.audit
     odoo_mcp.auth

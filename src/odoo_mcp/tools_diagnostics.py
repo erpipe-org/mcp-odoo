@@ -20,6 +20,7 @@ from .access_helpers import (
     _m2m_ids,
     _record_id_domain,
     _rule_applies,
+    _safe_metadata_read,
     _safe_odoo_read,
     access_permission_field,
 )
@@ -38,6 +39,7 @@ from .diagnostics import (
 )
 from .diagnostics import fit_gap_report as build_fit_gap_report
 from .diagnostics import upgrade_risk_report as build_upgrade_risk_report
+from .model_policy import get_model_policy
 from .schemas import BuildDomainResponse
 from .tool_helpers import (
     clamp_limit,
@@ -170,7 +172,12 @@ def inspect_model_relationships(
         if fields_metadata is None and use_live_metadata:
             metadata_source = "server"
             try:
-                _, odoo = _resolve_odoo(ctx, instance)
+                instance_name, odoo = _resolve_odoo(ctx, instance)
+                acl_refusal = get_model_policy().visibility_refusal(
+                    instance_name, model, tool="inspect_model_relationships"
+                )
+                if acl_refusal is not None:
+                    return acl_refusal
                 fields_metadata = odoo.get_model_fields(model)
                 if "error" in fields_metadata:
                     metadata_error = str(fields_metadata["error"])
@@ -256,7 +263,7 @@ def diagnose_access(
         _, odoo = _resolve_odoo(ctx, instance)
         metadata_errors: list[Dict[str, Any]] = []
 
-        model_rows, error = _safe_odoo_read(
+        model_rows, error = _safe_metadata_read(
             "ir.model",
             lambda: odoo.execute_method(
                 "ir.model",
@@ -285,7 +292,7 @@ def diagnose_access(
                 }
             )
 
-        user_context, error = _safe_odoo_read(
+        user_context, error = _safe_metadata_read(
             "res.users.context_get",
             lambda: (
                 odoo.get_user_context()
@@ -319,7 +326,7 @@ def diagnose_access(
         }
         user_group_ids: set[int] | None = None
         if isinstance(uid, int) and uid > 0:
-            user_fields, error = _safe_odoo_read(
+            user_fields, error = _safe_metadata_read(
                 "res.users.fields_get",
                 lambda: odoo.execute_method(
                     "res.users",
@@ -331,7 +338,7 @@ def diagnose_access(
             if error:
                 metadata_errors.append(error)
             available_user_fields = _field_names(user_fields)
-            user_rows, error = _safe_odoo_read(
+            user_rows, error = _safe_metadata_read(
                 "res.users.read",
                 lambda: odoo.execute_method(
                     "res.users",
@@ -363,7 +370,7 @@ def diagnose_access(
 
         acl_rows: list[Dict[str, Any]] = []
         if model_id is not None:
-            acl_rows_raw, error = _safe_odoo_read(
+            acl_rows_raw, error = _safe_metadata_read(
                 "ir.model.access",
                 lambda: odoo.execute_method(
                     "ir.model.access",
@@ -392,7 +399,7 @@ def diagnose_access(
         group_bound_rules: list[Dict[str, Any]] = []
         applicable_rules: list[Dict[str, Any]] = []
         if include_rules and model_id is not None:
-            rules_raw, error = _safe_odoo_read(
+            rules_raw, error = _safe_metadata_read(
                 "ir.rule",
                 lambda: odoo.execute_method(
                     "ir.rule",

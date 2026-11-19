@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Model/method ACL (`model_acl`).** An optional policy that decides which
+  Odoo models and methods an agent may use through this server, per instance.
+  Write it as a default (`allow` or `deny`) plus rules such as
+  `project.*:@read`, `project.task:@write` or
+  `project.project:message_subscribe`. The most specific rule wins. Every
+  call to Odoo is checked, including plugins and approved writes. Models the
+  agent cannot use at all are hidden from model listings. Without a
+  `model_acl` key nothing changes. See `docs/model-acl.md`.
+- An exact `model_acl` allow rule such as `sale.order:action_confirm` now
+  counts as the review `execute_method` needs for action-like or unknown
+  methods, so no second entry in `allowed_side_effect_methods` is needed.
+  Wildcard rules and an `allow` default do not count, so those methods stay
+  blocked until named. The existing allowlist keeps working.
+
 ## [1.3.2] - 2026-08-19
 
 ### Changed

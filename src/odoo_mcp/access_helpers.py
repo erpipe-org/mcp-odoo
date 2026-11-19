@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 from .diagnostics import classify_method_safety, sanitize_odoo_error
+from .model_policy import metadata_scope
 
 
 def access_permission_field(operation: str) -> str:
@@ -35,6 +36,18 @@ def _safe_odoo_read(
             "stage": label,
             "error": sanitize_odoo_error(str(exc)),
         }
+
+
+def _safe_metadata_read(
+    label: str, callback: Callable[[], Any]
+) -> tuple[Any, Dict[str, Any] | None]:
+    """Like ``_safe_odoo_read`` for server-internal metadata (model ACL exempt)."""
+
+    def run() -> Any:
+        with metadata_scope():
+            return callback()
+
+    return _safe_odoo_read(label, run)
 
 
 def _m2o_id(value: Any) -> int | None:
