@@ -24,6 +24,7 @@ from .diagnostics import (
     READ_ONLY_METHODS,
     sanitize_odoo_error,
 )
+from .model_policy import enforce_model_acl, metadata_scope
 
 SUPPORTED_TRANSPORTS = {"xmlrpc", "json2"}
 
@@ -80,6 +81,7 @@ class OdooClient:
         api_key: str | None = None,
         json2_database_header: bool = True,
         lang: str | None = None,
+        instance: str = "default",
     ) -> None:
         """
         Initialize the Odoo client with connection parameters
@@ -96,6 +98,7 @@ class OdooClient:
             json2_database_header: Whether JSON-2 calls should send X-Odoo-Database
             lang: Default Odoo locale to inject into context.lang
                 (caller-supplied context.lang always wins).
+            instance: Configured instance name; scopes the model ACL policy.
         """
         # Ensure URL has a protocol
         if not re.match(r"^https?://", url):
@@ -113,6 +116,7 @@ class OdooClient:
         self.api_key = api_key or (password if self.transport == "json2" else None)
         self.json2_database_header = json2_database_header
         self.lang = (lang or "").strip() or None
+        self.instance = instance
 
         # Set timeout and SSL verification
         self.timeout = timeout
@@ -220,7 +224,10 @@ class OdooClient:
         Read-only ORM methods retry on connection-level failures with
         exponential backoff (ODOO_MCP_RETRY_ATTEMPTS / ODOO_MCP_RETRY_BACKOFF).
         Anything that may mutate data is never retried.
+
+        Every RPC passes the model ACL choke point first (see model_policy).
         """
+        enforce_model_acl(getattr(self, "instance", "default"), model, method)
         kwargs = self._apply_lang_context(kwargs)
         extra_attempts = _retry_attempts() if method in READ_ONLY_METHODS else 0
         last_error: Exception | None = None
@@ -392,7 +399,8 @@ class OdooClient:
     def get_user_context(self) -> dict[str, Any]:
         """Return the current user's Odoo context."""
         try:
-            context = self._execute("res.users", "context_get")
+            with metadata_scope():
+                context = self._execute("res.users", "context_get")
             return cast(dict[str, Any], context)
         except Exception as e:
             print(f"Error retrieving user context: {str(e)}", file=sys.stderr)
@@ -401,14 +409,15 @@ class OdooClient:
     def get_installed_modules(self, limit: int = 100) -> list[dict[str, Any]]:
         """Return installed module names and labels with a bounded limit."""
         try:
-            result = self._execute(
-                "ir.module.module",
-                "search_read",
-                [["state", "=", "installed"]],
-                fields=["name", "shortdesc", "state"],
-                limit=limit,
-                order="name ASC",
-            )
+            with metadata_scope():
+                result = self._execute(
+                    "ir.module.module",
+                    "search_read",
+                    [["state", "=", "installed"]],
+                    fields=["name", "shortdesc", "state"],
+                    limit=limit,
+                    order="name ASC",
+                )
             return cast(list[dict[str, Any]], result)
         except Exception as e:
             print(f"Error retrieving installed modules: {str(e)}", file=sys.stderr)
@@ -472,7 +481,8 @@ class OdooClient:
         """
         try:
             # First search for model IDs
-            model_ids = self._execute("ir.model", "search", [])
+            with metadata_scope():
+                model_ids = self._execute("ir.model", "search", [])
 
             if not model_ids:
                 return {
@@ -483,7 +493,10 @@ class OdooClient:
 
             # Then read the model data with only the most basic fields
             # that are guaranteed to exist in all Odoo versions
-            result = self._execute("ir.model", "read", model_ids, ["model", "name"])
+            with metadata_scope():
+                result = self._execute(
+                    "ir.model", "read", model_ids, ["model", "name"]
+                )
 
             # Extract and sort model names alphabetically
             models = sorted([rec["model"] for rec in result])
@@ -518,12 +531,13 @@ class OdooClient:
             'Contact'
         """
         try:
-            result = self._execute(
-                "ir.model",
-                "search_read",
-                [("model", "=", model_name)],
-                fields=["name", "model"],
-            )
+            with metadata_scope():
+                result = self._execute(
+                    "ir.model",
+                    "search_read",
+                    [("model", "=", model_name)],
+                    fields=["name", "model"],
+                )
 
             if not result:
                 return {"error": f"Model {model_name} not found"}
@@ -567,9 +581,10 @@ class OdooClient:
             'char'
         """
         try:
-            fields = self._execute(
-                model_name, "fields_get", attributes=self.FIELDS_GET_ATTRIBUTES
-            )
+            with metadata_scope():
+                fields = self._execute(
+                    model_name, "fields_get", attributes=self.FIELDS_GET_ATTRIBUTES
+                )
             return cast(dict[str, Any], fields)
         except Exception as e:
             print(f"Error retrieving fields: {str(e)}", file=sys.stderr)
@@ -954,6 +969,7 @@ def build_odoo_client(entry: dict[str, Any], *, name: str = "default") -> OdooCl
         api_key=api_key,
         json2_database_header=json2_database_header,
         lang=lang,
+        instance=name,
     )
 
 

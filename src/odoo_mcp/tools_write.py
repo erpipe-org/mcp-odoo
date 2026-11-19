@@ -37,6 +37,7 @@ from .tool_helpers import (
     validate_method_name,
     validate_model_name,
 )
+from .model_policy import get_model_policy
 from .write_policy import chatter_direct_enabled, side_effect_method_allowed, writes_enabled
 from .rate_limit import check_rate
 from .server_core import (
@@ -219,6 +220,14 @@ def preview_write(
     """
     try:
         validate_model_name(model)
+        acl_refusal = get_model_policy().refusal(
+            _srv().resolve_instance_name(instance),
+            model,
+            str(operation).strip().lower(),
+            tool="preview_write",
+        )
+        if acl_refusal is not None:
+            return acl_refusal
         report = build_write_preview_report(
             model=model,
             operation=operation,
@@ -263,6 +272,11 @@ def validate_write(
     try:
         validate_model_name(model)
         instance_name = _srv().resolve_instance_name(instance)
+        acl_refusal = get_model_policy().refusal(
+            instance_name, model, str(operation).strip().lower(), tool="validate_write"
+        )
+        if acl_refusal is not None:
+            return acl_refusal
 
         resolved_binary_values: Dict[str, Any] = {}
         if values:
@@ -586,6 +600,11 @@ def chatter_post(
     try:
         instance_name, odoo = _resolve_odoo(ctx, instance)
         validate_model_name(model)
+        acl_refusal = get_model_policy().refusal(
+            instance_name, model, "message_post", tool="chatter_post"
+        )
+        if acl_refusal is not None:
+            return acl_refusal
         if record_id < 1:
             raise ValueError("record_id must be greater than 0")
         body_text = (body or "").strip()
@@ -757,19 +776,29 @@ def execute_method(
                     "preview_write -> validate_write -> execute_approved_write."
                 ),
             }
+        model_policy = get_model_policy()
+        acl_instance = _srv().resolve_instance_name(instance)
+        acl_refusal = model_policy.refusal(acl_instance, model, method)
+        if acl_refusal is not None:
+            return acl_refusal
         review_required = safety["safety"] in {"side_effect", "unknown"}
         if (
             review_required
             and not side_effect_method_allowed(model, method)
+            # An exact model_acl allow rule ("sale.order:action_confirm") is
+            # the review; wildcards and the default are not.
+            and not model_policy.explicitly_allowed(acl_instance, model, method)
             and not truthy_env("ODOO_MCP_ALLOW_UNKNOWN_METHODS")
         ):
             return {
                 "success": False,
                 "error": (
                     "Unreviewed side-effect methods are blocked by default. Review "
-                    "custom source, then add the exact 'model.method' to the policy "
-                    "file (ODOO_MCP_POLICY_FILE, default ./odoo_mcp_policy.json, "
-                    "re-read on every request — see odoo_mcp_policy.json.example) "
+                    "custom source, then add an exact model_acl allow rule "
+                    f"('{model}:{method}', no wildcards; see docs/model-acl.md) "
+                    "or the exact 'model.method' to allowed_side_effect_methods "
+                    "in the policy file (ODOO_MCP_POLICY_FILE, default "
+                    "./odoo_mcp_policy.json — see odoo_mcp_policy.json.example) "
                     "or to ODOO_MCP_ALLOWED_SIDE_EFFECT_METHODS=model.method, or "
                     "set ODOO_MCP_ALLOW_UNKNOWN_METHODS=1 only for trusted "
                     "deployments."

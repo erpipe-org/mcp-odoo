@@ -240,14 +240,17 @@ def odoo_major_version(odoo: OdooClient) -> int | None:
             major = parse_odoo_major_version(raw)
             if major is not None:
                 return major
+    from .model_policy import metadata_scope
+
     try:
-        result = odoo.execute_method(
-            "ir.module.module",
-            "search_read",
-            [["name", "=", "base"]],
-            fields=["latest_version"],
-            limit=1,
-        )
+        with metadata_scope():
+            result = odoo.execute_method(
+                "ir.module.module",
+                "search_read",
+                [["name", "=", "base"]],
+                fields=["latest_version"],
+                limit=1,
+            )
     except Exception:
         return None
     if not result:

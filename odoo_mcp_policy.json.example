@@ -16,5 +16,16 @@
       "hr.employee": { "allow": ["name", "work_email", "department_id", "job_id"] },
       "*": { "deny": ["message_ids"] }
     }
+  },
+  "model_acl_comment": "Optional model/method ACL. Per instance: 'default' ('allow' or 'deny') plus rules; patterns are 'model:method' with * globs and the groups @read / @write. Most specific rule wins, deny wins ties. For 'block all except', set default to 'deny' and list allow rules. The server's own metadata lookups stay exempt unless 'metadata': 'enforce'. An extra gate: the write switch and approvals still apply. An exact 'model:method' allow rule (no wildcards) also counts as the execute_method side-effect review, replacing an allowed_side_effect_methods entry. See docs/model-acl.md.",
+  "model_acl": {
+    "default": {
+      "default": "allow",
+      "rules": [
+        { "deny": "hr.*", "reason": "No HR data through agents." },
+        { "deny": "*:unlink" },
+        { "deny": "project.project:message_subscribe" }
+      ]
+    }
   }
 }

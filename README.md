@@ -66,6 +66,7 @@ Once configured (see [Setup](#setup)), ask your agent things like:
 | --- | --- |
 | 41 MCP tools | Read records and attachments, aggregate server-side, post chatter, inspect schema, build domains, scan addons, diagnose calls and upgrade logs, check data quality, access rules, resolve model renames, validate writes, and fan out across instances. |
 | Field-level ACL | Opt-in per-instance, per-model field allow/deny enforced on every read path (records, aggregates, knowledge index, resources). First open-source Odoo MCP with it. See [docs/field-acl.md](docs/field-acl.md). |
+| Model/method ACL | Opt-in per-instance `model:method` allow/deny policy ("block all except `project.*`", "allow all except `project.project:message_subscribe`"), enforced on every Odoo call the server makes. See [docs/model-acl.md](docs/model-acl.md). |
 | Cross-instance queries | Read-only fan-out across many client DBs with merged, attributed, partial-failure-tolerant results — no warehouse, no sync. See [docs/partner-playbook.md](docs/partner-playbook.md). |
 | Workflow prompts | 11 prompts including 6 end-to-end business workflows (invoice approval, PO match, onboarding, expense review, month-end close, pre-migration data quality) that route writes through the gate. |
 | Background tasks | `submit_async_task` runs long read operations (addon scans, knowledge indexing, AR/AP aging) on a bounded worker pool; poll with `get_async_task` while the agent keeps reasoning. |
@@ -262,6 +263,7 @@ Optional environment variables:
 | `ODOO_MCP_ASYNC_RESULT_TTL` | `3600` | Seconds a finished background task result stays pollable. |
 | `ODOO_MCP_KNOWLEDGE_MAX_DOCS` | `5000` | Total documents allowed across all local BM25 knowledge indexes. |
 | `ODOO_MCP_FIELD_POLICY_FILE` | shared policy file | Field ACL policy (a `field_acl` key in the policy file, or a dedicated file here). Denied fields are removed from every read path. See [docs/field-acl.md](docs/field-acl.md). |
+| `ODOO_MCP_MODEL_POLICY_FILE` | shared policy file | Model/method ACL policy (a `model_acl` key in the policy file, or a dedicated file here). Denied model/method calls are refused before they reach Odoo. See [docs/model-acl.md](docs/model-acl.md). |
 | `ODOO_MCP_CROSS_INSTANCE_WORKERS` | `4` | Bounded concurrency for cross-instance fan-out tools. |
 | `MCP_CHATTER_DIRECT` | `0` | Truthy → `chatter_post` skips the approval token gate and posts immediately. |
 | `MCP_ALLOW_REMOTE_HTTP` | `0` | Truthy → permit non-local HTTP binds (still requires external auth/TLS). |
@@ -448,7 +450,7 @@ One question across many configured instances, merged and attributed. See the [p
 
 | Tool | Purpose |
 | --- | --- |
-| `health_check` | Report non-secret MCP runtime posture, including rate-limit counters and field-ACL status when enabled. |
+| `health_check` | Report non-secret MCP runtime posture, including rate-limit counters and field-/model-ACL status when enabled. |
 | `list_instances` | List configured Odoo instance names, URLs, databases, transports, and cross-instance tags — never credentials. |
 
 ## Resources

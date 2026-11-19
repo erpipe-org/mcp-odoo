@@ -19,6 +19,7 @@ from .agent_tools import (
     rank_relevant_fields,
 )
 from .field_policy import get_field_policy
+from .model_policy import get_model_policy
 from .odoo_client import list_configured_instances
 from .rate_limit import check_rate, rate_report
 from .schemas import (
@@ -177,7 +178,10 @@ def schema_catalog(
                 "error": raw_models["error"],
             }
 
-        model_names = list(raw_models.get("model_names", []))
+        # Model ACL: models with every method denied are not exposed at all.
+        model_names = get_model_policy().filter_models(
+            instance_name, list(raw_models.get("model_names", []))
+        )
         model_details = raw_models.get("models_details", {})
         if models:
             model_filter = set(models)
@@ -288,13 +292,16 @@ def list_models(
     Prefer this read-only tool over execute_method when discovering models.
     """
     try:
-        _, odoo = _resolve_odoo(ctx, instance)
+        instance_name, odoo = _resolve_odoo(ctx, instance)
         limit = clamp_limit(limit, maximum=500)
         models = odoo.get_models()
         if "error" in models:
             return {"success": False, "error": models["error"]}
 
-        model_names = models.get("model_names", [])
+        # Model ACL: models with every method denied are not exposed at all.
+        model_names = get_model_policy().filter_models(
+            instance_name, models.get("model_names", [])
+        )
         models_details = models.get("models_details", {})
         if query:
             query_lower = query.lower()
@@ -343,6 +350,9 @@ def get_model_fields(
             raise ValueError('relevance must be "top" when provided')
         instance_name, odoo = _resolve_odoo(ctx, instance)
         validate_model_name(model)
+        acl_refusal = get_model_policy().visibility_refusal(instance_name, model)
+        if acl_refusal is not None:
+            return acl_refusal
         fields = odoo.get_model_fields(model)
         if "error" in fields:
             return {"success": False, "error": fields["error"]}
@@ -422,6 +432,9 @@ def search_records(
         if refusal is not None:
             return refusal
         validate_model_name(model)
+        acl_refusal = get_model_policy().refusal(instance_name, model, "search_read")
+        if acl_refusal is not None:
+            return acl_refusal
         limit = clamp_limit(limit)
         if offset < 0:
             raise ValueError("offset must be greater than or equal to 0")
@@ -491,6 +504,9 @@ def read_record(
         if refusal is not None:
             return refusal
         validate_model_name(model)
+        acl_refusal = get_model_policy().refusal(instance_name, model, "read")
+        if acl_refusal is not None:
+            return acl_refusal
         if record_id < 1:
             raise ValueError("record_id must be greater than 0")
         resolved_fields = resolve_read_fields(
@@ -649,6 +665,9 @@ def aggregate_records(
         if refusal is not None:
             return refusal
         validate_model_name(model)
+        acl_refusal = get_model_policy().refusal(instance_name, model, "read_group")
+        if acl_refusal is not None:
+            return acl_refusal
         if not group_by:
             raise ValueError("group_by must include at least one field")
         if offset < 0:
